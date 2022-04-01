@@ -1,0 +1,37 @@
+name: Azure CLI
+on:
+  push:
+    branches:
+      - 'main'
+    paths:
+      - 'trigger.md'
+  workflow_dispatch:
+
+jobs:
+  Setup:
+    name: Setup Ubuntu runner
+    runs-on: ubuntu-18.04
+    steps:
+    - name: Manual stuffs
+      run: |
+        az extension list
+        az config set extension.use_dynamic_install=yes_without_prompt
+        az extension list-available --output table | grep -iE 'aro|ext|az-cli'
+        az extension add --help
+        az aro create cluster --sdn-type --help
+          
+#    - name: Azure login
+#        uses: azure/login@v1
+#        with:
+#          creds: ${{ secrets.AZURE_CREDENTIALS }}
+                            
+#    - name: Spin up CLI container
+#      uses: azure/CLI@v1
+#      with:
+#        azcliversion: latest
+#        inlineScript: |
+#          #az account set --subscription ${{ secrets.SUBSCRIPTION_ID }}
+#          wget -O $GITHUB_WORKSPACE/az-aroext-latest.whl "https://aka.ms/az-aroext-latest.whl"
+#          az extension add -s $GITHUB_WORKSPACE/az-aroext-latest.whl --system
+#          az extension list
+#          az aro create cluster --help

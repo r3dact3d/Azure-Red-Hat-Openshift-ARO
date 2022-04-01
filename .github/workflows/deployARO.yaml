@@ -1,0 +1,61 @@
+name: Deploy ARO
+on:
+  push:
+    branches:
+      - 'main'
+    paths:
+      - 'trigger.md'
+  workflow_dispatch:
+
+jobs:
+  Setup:
+    name: Setup Ubuntu runner
+    runs-on: ubuntu-latest
+    steps:
+#    - name: Azure login
+#        uses: azure/login@v1
+#        with:
+#          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          
+      - uses: actions/checkout@main
+      
+      - name: Install OpenShift CLI tools
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          openshift-install: 4.9
+          oc: 4.9
+                  
+      - name: Provision
+        uses: azure/CLI@v1
+        with:
+          azcliversion: 2.33.0
+          inlineScript: |
+            source envs
+            az login
+            az account set --subscription ${{ secrets.SUBSCRIPTION_ID }}
+            az feature register --namespace Microsoft.RedHatOpenShift --name preview
+            az provider register -n Microsoft.RedHatOpenShift --wait
+            az provider register -n Microsoft.Compute --wait
+            az provider register -n Microsoft.Storage --wait
+            az provider register -n Microsoft.Authorization --wait
+            az provider register -n Microsoft.Network --wait
+            az group create --name $RESOURCEGROUP --location $LOCATION
+            az network vnet create -g $RESOURCEGROUP --name aro-vnet --address-prefixes 10.0.0.0/22
+            az network vnet subnet create -g $RESOURCEGROUP --vnet-name aro-vnet --name controlplane-subnet --address-prefixes 10.0.0.0/23 --service-endpoints Microsoft.ContainerRegistry
+            az network vnet subnet create -g $RESOURCEGROUP --vnet-name aro-vnet --name compute-subnet --address-prefixes 10.0.2.0/23 --service-endpoints Microsoft.ContainerRegistry
+            az network vnet subnet update --name controlplane-subnet -g $RESOURCEGROUP --vnet-name aro-vnet --disable-private-link-service-network-policies true
+            az aro create -g $RESOURCEGROUP -l $LOCATION -n $CLUSTER --vnet aro-vnet --master-subnet controlplane-subnet --worker-subnet compute-subnet --pull-secret '${{ secrets.RED_HAT_PULLSECRET }}' --verbose
+            
+      - name: Create GitOps 
+        run: |
+          export kubeadminPassword=`az aro list-credentials --name $CLUSTER --resource-group $RESOURCEGROUP --query kubeadminPassword -o tsv`
+          export apiServer=`az aro show -g $RESOURCEGROUP -n $CLUSTER --query apiserverProfile.url -o tsv`
+          oc login $apiServer -u kubeadmin -p $kubeadminPassword
+          oc apply -f https://raw.githubusercontent.com/r3dact3d/OCP4-Deploy/main/gitops-operator.yaml -n openshift-operators
+          sleep 120
+          oc project openshift-gitops
+          oc adm policy add-cluster-role-to-user cluster-admin -z openshift-gitops-argocd-application-controller
+          oc apply -f https://raw.githubusercontent.com/r3dact3d/gitops/main/blinker19/gitops-appsets.yaml
+          
+
+            
